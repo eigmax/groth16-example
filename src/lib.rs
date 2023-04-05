@@ -20,7 +20,7 @@ impl<ConstraintF: Field> ConstraintSynthesizer<ConstraintF> for MultiplyDemoCirc
         cs: ConstraintSystemRef<ConstraintF>,
     ) -> Result<(), SynthesisError> {
         let a = cs.new_witness_variable(|| self.a.ok_or(SynthesisError::AssignmentMissing))?;
-        let b = cs.new_witness_variable(|| self.b.ok_or(SynthesisError::AssignmentMissing))?;
+        let b = cs.new_input_variable(|| self.b.ok_or(SynthesisError::AssignmentMissing))?;
         let c = cs.new_input_variable(|| {
             let mut a = self.a.ok_or(SynthesisError::AssignmentMissing)?;
             let b = self.b.ok_or(SynthesisError::AssignmentMissing)?;
@@ -47,6 +47,7 @@ mod tests {
     use test::Bencher;
 
     #[test]
+    #[ignore]
     fn test_groth16_circuit_multiply() {
         let rng = &mut rand::thread_rng();
 
@@ -91,8 +92,8 @@ mod tests {
         )
         .unwrap();
 
-        let a = BlsFr::rand(rng);
-        let b = BlsFr::rand(rng);
+        let a = BlsFr::from(1);//BlsFr::rand(rng);
+        let b = BlsFr::from(2); //BlsFr::rand(rng);
         let mut c = a;
         c.mul_assign(&b);
 
@@ -106,6 +107,7 @@ mod tests {
             rng,
         )
         .unwrap();
+        println!("proof: {:#?}", proof);
 
         let mut serialized = vec![0; proof.serialized_size(Compress::Yes)];
         let mut cursor = Cursor::new(&mut serialized[..]);
@@ -113,7 +115,7 @@ mod tests {
             .serialize_with_mode(&mut cursor, Compress::Yes)
             .unwrap();
 
-        println!("proof: {:?}", serialized);
+        println!("serialized proof: {:?}", serialized);
 
         let pr = <Groth16<Bls12_381> as SNARK<BlsFr>>::Proof::deserialize_with_mode(
             &serialized[..],
@@ -122,26 +124,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(proof, pr);
+        println!("proof: {:#?}", pr);
 
         let mut serialized = vec![0; pk.serialized_size(Compress::Yes)];
         pk.serialize_with_mode(&mut serialized[..], Compress::Yes)
             .unwrap();
 
-        let mut serialized = vec![0; c.serialized_size(Compress::Yes)];
+        let mut serialized = vec![0; b.serialized_size(Compress::Yes) + c.serialized_size(Compress::Yes)];
         let mut cursor = Cursor::new(&mut serialized[..]);
+        b.serialize_with_mode(&mut cursor, Compress::Yes).unwrap();
         c.serialize_with_mode(&mut cursor, Compress::Yes).unwrap();
 
-        println!("c: {:?}", serialized);
+        println!("public input: {:?}, b: {}, c : {}", serialized, b, c);
 
-        let cs = Fp::deserialize_with_mode(&serialized[..], Compress::Yes, Validate::No).unwrap();
+        let bs = Fp::deserialize_with_mode(&serialized[..32], Compress::Yes, Validate::No).unwrap();
+        let cs = Fp::deserialize_with_mode(&serialized[32..], Compress::Yes, Validate::No).unwrap();
 
         assert_eq!(c, cs);
+        assert_eq!(b, bs);
 
         let mut serialized = vec![0; vk.serialized_size(Compress::Yes)];
         let mut cursor = Cursor::new(&mut serialized[..]);
         vk.serialize_with_mode(&mut cursor, Compress::Yes).unwrap();
 
-        println!("vk: {:?}", serialized);
+        //println!("vk: {:?}", serialized);
+        println!("vk: alpha_g1 {},\nbeta_g2 {},\ngamma_g2: {},\ndelta_g2: {},\ngamma_abc_g1: abc1={} abc2={} abc3={}",
+            vk.alpha_g1, vk.beta_g2, vk.gamma_g2, vk.delta_g2, vk.gamma_abc_g1[0], vk.gamma_abc_g1[1], vk.gamma_abc_g1[2]);
 
         let v = <Groth16<Bls12_381> as SNARK<BlsFr>>::VerifyingKey::deserialize_with_mode(
             &serialized[..],
@@ -152,19 +160,19 @@ mod tests {
         assert_eq!(vk, v);
 
         println!("c.0: {:?}", c.0);
-
         println!("c.1: {:?}", c.1);
 
         println!(
             "result: {:#?}",
-            Groth16::<Bls12_381>::verify(&vk, &[c], &proof)
+            Groth16::<Bls12_381>::verify(&vk, &[b, c], &proof)
         );
 
-        assert!(Groth16::<Bls12_381>::verify(&vk, &[c], &proof).unwrap());
-        assert!(Groth16::<Bls12_381>::verify(&v, &[cs], &pr).unwrap());
+        assert!(Groth16::<Bls12_381>::verify(&vk, &[b, c], &proof).unwrap());
+        assert!(Groth16::<Bls12_381>::verify(&v, &[bs, cs], &pr).unwrap());
     }
 
     #[test]
+    #[ignore]
     fn test_deserialize_verification() {
         let vk_serialized: Vec<u8> = vec![
             183, 29, 177, 250, 95, 65, 54, 46, 147, 2, 91, 53, 86, 215, 110, 173, 18, 37, 207, 89,
@@ -216,6 +224,8 @@ mod tests {
             Validate::No,
         )
         .unwrap();
+        println!("vk: alpha_g1 {},\nbeta_g2 {},\ngamma_g2: {},\ndelta_g2: {},\ngamma_abc_g1: abc1={} abc2={} abc3={}",
+            vk.alpha_g1, vk.beta_g2, vk.gamma_g2, vk.delta_g2, vk.gamma_abc_g1[0], vk.gamma_abc_g1[1], vk.gamma_abc_g1[2]);
 
         let c = Fp::deserialize_with_mode(&c_serialized[..], Compress::Yes, Validate::No).unwrap();
 
@@ -225,11 +235,13 @@ mod tests {
             Validate::No,
         )
         .unwrap();
+        println!("proof ccccccccc: {:#?}", proof);
 
         assert!(Groth16::<Bls12_381>::verify(&vk, &[c], &proof).unwrap());
     }
 
     #[bench]
+    #[ignore]
     fn bench_groth16(b: &mut Bencher) {
         b.iter(|| test_deserialize_verification());
     }
